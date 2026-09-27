@@ -1,0 +1,67 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      zip_path:
+        description: "Repository path to the uploaded Flutter project ZIP"
+        required: true
+        type: string
+        default: "incoming/project.zip"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Extract Flutter project
+        id: project
+        shell: bash
+        env:
+          ZIP_PATH: ${{ inputs.zip_path }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "$ZIP_PATH" ]; then
+            echo "Project ZIP not found: $ZIP_PATH"
+            exit 1
+          fi
+
+          mkdir -p extracted
+          unzip -q "$ZIP_PATH" -d extracted
+
+          PUBSPEC="$(find extracted -name pubspec.yaml -print -quit)"
+          if [ -z "$PUBSPEC" ]; then
+            echo "No pubspec.yaml found in the ZIP."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$PUBSPEC")"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Get Flutter dependencies
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        run: flutter pub get
+
+      - name: Build release APK
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-apk
+          path: ${{ steps.project.outputs.project_dir }}/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+          retention-days: 7
